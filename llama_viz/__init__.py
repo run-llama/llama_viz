@@ -1,3 +1,3 @@
-from .dash_backend import DashBackend
+from .viz import Viz
 
-__all__ = ["DashBackend"]
+__all__ = ["Viz"]

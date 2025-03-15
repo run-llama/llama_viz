@@ -15,7 +15,7 @@ from .components import get_input_component, get_output_component
 from .utils import get_external_stylesheets, get_workflow_inputs, get_workflow_outputs
 
 
-class DashBackend:
+class Viz:
     def __init__(self, workflow: Workflow, theme: str = "bootstrap") -> None:
         """
         Initialize the Dash backend for the workflow.

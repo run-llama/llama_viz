@@ -2,14 +2,18 @@ from llama_index.core.workflow import Context, StartEvent, StopEvent, Workflow, 
 from openai import OpenAI
 from pydantic import HttpUrl
 
-from llama_viz import DashBackend
+from llama_viz import Viz
 
 
 class QueryEvent(StartEvent):
+    """The `query` parameter will be shown as an input text box in the UI."""
+
     query: str
 
 
 class ImageDrawn(StopEvent):
+    """The `image` parameter will be shown as an image coming from an url in the UI."""
+
     image: HttpUrl
 
 
@@ -33,5 +37,7 @@ class ImageDrawWorkflow(Workflow):
 
 
 if __name__ == "__main__":
-    be = DashBackend(ImageDrawWorkflow())
+    # Wrap the workflow in a Viz object.
+    be = Viz(ImageDrawWorkflow())
+    # Run the UI, the workflow will run in the background.
     be.run(debug=True)
