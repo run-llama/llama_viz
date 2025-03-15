@@ -5,14 +5,14 @@ from typing import Any, Dict, List, Type
 
 import dash_bootstrap_components as dbc
 import pandas as pd
-import plotly.graph_objs as go
-from dash import Dash, Input, Output, State, dash_table, dcc, html
+from dash import Dash, Input, Output, State, html
 from dash.dependencies import Component
 from dash.exceptions import PreventUpdate
 from llama_index.core.workflow import Workflow
 from pydantic import BaseModel, HttpUrl
 
-from .utils import get_workflow_inputs, get_workflow_outputs
+from .components import get_input_component, get_output_component
+from .utils import get_external_stylesheets, get_workflow_inputs, get_workflow_outputs
 
 
 class DashBackend:
@@ -27,259 +27,20 @@ class DashBackend:
                   lumen, lux, materia, minty, pulse, sandstone, simplex, sketchy,
                   slate, solar, spacelab, superhero, united, yeti
         """
-        theme_map = {
-            "bootstrap": dbc.themes.BOOTSTRAP,
-            "cerulean": dbc.themes.CERULEAN,
-            "cosmo": dbc.themes.COSMO,
-            "cyborg": dbc.themes.CYBORG,
-            "darkly": dbc.themes.DARKLY,
-            "flatly": dbc.themes.FLATLY,
-            "journal": dbc.themes.JOURNAL,
-            "litera": dbc.themes.LITERA,
-            "lumen": dbc.themes.LUMEN,
-            "lux": dbc.themes.LUX,
-            "materia": dbc.themes.MATERIA,
-            "minty": dbc.themes.MINTY,
-            "pulse": dbc.themes.PULSE,
-            "sandstone": dbc.themes.SANDSTONE,
-            "simplex": dbc.themes.SIMPLEX,
-            "sketchy": dbc.themes.SKETCHY,
-            "slate": dbc.themes.SLATE,
-            "solar": dbc.themes.SOLAR,
-            "spacelab": dbc.themes.SPACELAB,
-            "superhero": dbc.themes.SUPERHERO,
-            "united": dbc.themes.UNITED,
-            "yeti": dbc.themes.YETI,
-        }
-
-        external_stylesheets = [theme_map.get(theme.lower(), dbc.themes.BOOTSTRAP)]
-
-        self._app = Dash(__name__, external_stylesheets=external_stylesheets)
-        self._workflow = workflow
+        self._app = Dash(__name__, external_stylesheets=get_external_stylesheets(theme))
         self._theme = theme
-
+        # Setup and introspect workflow
+        self._workflow = workflow
         self._inputs: dict[str, type] = get_workflow_inputs(self._workflow)
         self._outputs: dict[str, type] = get_workflow_outputs(self._workflow)
-
+        # Dash data
         self._input_components = []
         self._output_components = []
         self._state_components = []
         self._get_components()
-
-        self._app.layout = self._get_layout()
         self._create_callback()
-
-    def _get_input_component(self, name: str, type_hint: Type) -> tuple[Component, str]:
-        """
-        Get the appropriate input component for the given type hint.
-
-        Returns:
-            A tuple of (component, property_name)
-        """
-        if type_hint is str:
-            return (
-                dbc.Input(
-                    id=f"input-{name}",
-                    type="text",
-                    placeholder=f"Enter {name}...",
-                    className="mb-2",
-                ),
-                "value",
-            )
-        elif type_hint is int:
-            return (
-                dbc.Input(
-                    id=f"input-{name}",
-                    type="number",
-                    step=1,
-                    placeholder=f"Enter {name} (number)...",
-                    className="mb-2",
-                ),
-                "value",
-            )
-        elif type_hint is float:
-            return (
-                dbc.Input(
-                    id=f"input-{name}",
-                    type="number",
-                    step=0.1,
-                    placeholder=f"Enter {name} (decimal)...",
-                    className="mb-2",
-                ),
-                "value",
-            )
-        elif type_hint is bool:
-            return (
-                dbc.Checkbox(id=f"input-{name}", label=name, className="mb-2"),
-                "value",
-            )
-        elif type_hint is datetime.date:
-            return (
-                dcc.DatePickerSingle(
-                    id=f"input-{name}",
-                    date=datetime.date.today(),
-                    display_format="YYYY-MM-DD",
-                    className="mb-2",
-                ),
-                "date",
-            )
-        elif (
-            type_hint is list
-            or type_hint is List
-            or hasattr(type_hint, "__origin__")
-            and type_hint.__origin__ is list
-        ):
-            return (
-                dbc.Textarea(
-                    id=f"input-{name}",
-                    placeholder=f"Enter {name} as JSON list...",
-                    className="mb-2",
-                    rows=3,
-                ),
-                "value",
-            )
-        elif (
-            type_hint is dict
-            or type_hint is Dict
-            or hasattr(type_hint, "__origin__")
-            and type_hint.__origin__ is dict
-        ):
-            return (
-                dbc.Textarea(
-                    id=f"input-{name}",
-                    placeholder=f"Enter {name} as JSON object...",
-                    className="mb-2",
-                    rows=4,
-                ),
-                "value",
-            )
-        elif issubclass(type_hint, BaseModel):
-            return (
-                dbc.Textarea(
-                    id=f"input-{name}",
-                    placeholder=f"Enter {name} as JSON object...",
-                    className="mb-2",
-                    rows=4,
-                ),
-                "value",
-            )
-        else:
-            # Default to text input for unknown types
-            return (
-                dbc.Input(
-                    id=f"input-{name}",
-                    type="text",
-                    placeholder=f"Enter {name}...",
-                    className="mb-2",
-                ),
-                "value",
-            )
-
-    def _get_output_component(
-        self, name: str, type_hint: Type
-    ) -> tuple[Component, str]:
-        """
-        Get the appropriate output component for the given type hint.
-
-        Returns:
-            A tuple of (component, property_name)
-        """
-        if type_hint is str:
-            return (
-                dbc.Textarea(
-                    id=f"output-{name}",
-                    placeholder="Output will appear here...",
-                    style={"width": "100%", "minHeight": "100px"},
-                    className="mb-2",
-                    readOnly=True,
-                ),
-                "value",
-            )
-        elif type_hint is int or type_hint is float:
-            return (
-                dbc.Input(id=f"output-{name}", type="text", className="mb-2"),
-                "value",
-            )
-        elif type_hint is bool:
-            return (
-                dbc.Input(id=f"output-{name}", type="text", className="mb-2"),
-                "value",
-            )
-        elif type_hint is HttpUrl or type_hint.__name__ == "HttpUrl":
-            return (
-                html.Img(
-                    id=f"output-{name}",
-                    style={
-                        "maxWidth": "100%",
-                        "maxHeight": "500px",
-                        "marginTop": "10px",
-                    },
-                    className="mb-2",
-                ),
-                "src",
-            )
-        elif (
-            type_hint is list
-            or type_hint is List
-            or hasattr(type_hint, "__origin__")
-            and type_hint.__origin__ is list
-        ):
-            return (
-                dbc.Textarea(
-                    id=f"output-{name}",
-                    placeholder="Output will appear here...",
-                    style={"width": "100%", "minHeight": "100px"},
-                    className="mb-2",
-                    readOnly=True,
-                ),
-                "value",
-            )
-        elif (
-            type_hint is dict
-            or type_hint is Dict
-            or hasattr(type_hint, "__origin__")
-            and type_hint.__origin__ is dict
-        ):
-            return (
-                dbc.Textarea(
-                    id=f"output-{name}",
-                    placeholder="Output will appear here...",
-                    style={"width": "100%", "minHeight": "100px"},
-                    className="mb-2",
-                    readOnly=True,
-                ),
-                "value",
-            )
-        elif type_hint is pd.DataFrame:
-            return (
-                dash_table.DataTable(
-                    id=f"output-{name}",
-                    page_size=10,
-                    style_table={"overflowX": "auto"},
-                ),
-                "data",
-            )
-        elif (
-            type_hint.__name__ == "Figure"
-            or hasattr(type_hint, "__name__")
-            and "Figure" in type_hint.__name__
-        ):
-            return (
-                dcc.Graph(id=f"output-{name}", figure=go.Figure(), className="mb-2"),
-                "figure",
-            )
-        else:
-            # Default to JSON output for complex types
-            return (
-                dbc.Textarea(
-                    id=f"output-{name}",
-                    placeholder="Output will appear here...",
-                    style={"width": "100%", "minHeight": "100px"},
-                    className="mb-2",
-                    readOnly=True,
-                ),
-                "value",
-            )
+        # App layout
+        self._app.layout = self._get_layout()
 
     def _get_components(self) -> None:
         """Set up dash components for inputs and outputs"""
@@ -290,7 +51,7 @@ class DashBackend:
         # Create input components
         self._input_widgets = []
         for name, _type in self._inputs.items():
-            component, property_name = self._get_input_component(name, _type)
+            component, property_name = get_input_component(name, _type)
             self._input_widgets.append(
                 dbc.CardGroup([dbc.Label(name.capitalize()), component])
             )
@@ -305,7 +66,7 @@ class DashBackend:
         # Create output components
         self._output_widgets = []
         for name, _type in self._outputs.items():
-            component, property_name = self._get_output_component(name, _type)
+            component, property_name = get_output_component(name, _type)
             self._output_widgets.append(
                 dbc.CardGroup([dbc.Label(f"Output: {name.capitalize()}"), component])
             )
