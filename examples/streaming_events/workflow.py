@@ -20,7 +20,7 @@ class InfoMessage(Event):
     msg: str
 
 
-class ErrorMessagge(InfoMessage):
+class ErrorMessage(InfoMessage):
     pass
 
 
@@ -30,7 +30,7 @@ class StreamingWorkflow(Workflow):
         for msg in ("Hello, world", "I am an info message"):
             ctx.write_event_to_stream(InfoMessage(msg=msg))
 
-        ctx.write_event_to_stream(ErrorMessagge(msg="There was an error"))
+        ctx.write_event_to_stream(ErrorMessage(msg="There was an error"))
         return StopEvent(result="Finish")
 
 

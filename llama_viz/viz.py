@@ -8,7 +8,7 @@ import pandas as pd
 from dash import Dash, Input, Output, State, html
 from dash.dependencies import Component
 from dash.exceptions import PreventUpdate
-from llama_index.core.workflow import Workflow
+from llama_index.core.workflow import StopEvent, Workflow
 from pydantic import BaseModel, HttpUrl
 
 from .components import get_input_component, get_output_component
@@ -121,6 +121,24 @@ class Viz:
                         ),
                         # Output column
                         dbc.Col([html.H3("Outputs"), *self._output_widgets], md=7),
+                    ]
+                ),
+                # Events stream pane
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            [
+                                html.H3("Events"),
+                                dbc.Textarea(
+                                    id="events-stream",
+                                    placeholder="Events streamed will appear here...",
+                                    style={"width": "100%", "minHeight": "200px"},
+                                    className="mb-3",
+                                    readOnly=True,
+                                ),
+                            ],
+                            md=12,
+                        ),
                     ]
                 ),
                 # Loading spinner
@@ -269,16 +287,15 @@ class Viz:
             except Exception:
                 return str(value)
 
-    async def _run_workflow_async(self, input_data: dict[str, Any]) -> Any:
-        """Run the workflow with the provided input data"""
-        result = await self._workflow.run(**input_data)
-        return result
-
     def _create_callback(self):
         """Create the main callback for the workflow"""
 
+        # Add events-stream to output components
+        events_output = Output(component_id="events-stream", component_property="value")
+        all_outputs = self._output_components + [events_output]
+
         @self._app.callback(
-            output=self._output_components,
+            output=all_outputs,
             inputs=self._input_components,
             state=self._state_components,
         )
@@ -293,8 +310,34 @@ class Viz:
                 if parsed_value is not None:  # Only add non-None values
                     run_params[input_name] = parsed_value
 
-            # Run the workflow
-            result = asyncio.run(self._run_workflow_async(run_params))
+            # Collect events
+            events_log = []
+
+            # Create a context manager to collect events
+            class EventCollector:
+                def __init__(self, events_list):
+                    self.events = events_list
+
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, exc_type, exc_val, exc_tb):
+                    pass
+
+                def append(self, event):
+                    event_str = json.dumps(event, default=str)
+                    self.events.append(event_str)
+
+            # Run the workflow with event collection
+            async def run_with_events():
+                handler = self._workflow.run(**run_params)
+                async for event in handler.stream_events():
+                    if not isinstance(event, StopEvent):
+                        events_log.append(json.dumps(event, default=str))
+                result = await handler
+                return result
+
+            result = asyncio.run(run_with_events())
 
             # Format output values
             output_values = []
@@ -322,6 +365,10 @@ class Viz:
                     output_values.append(
                         self._format_output_value(output_value, output_type)
                     )
+
+            # Add events log to output values
+            events_text = "\n".join(events_log)
+            output_values.append(events_text)
 
             return output_values
 
