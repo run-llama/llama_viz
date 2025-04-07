@@ -1,7 +1,12 @@
-from typing import Any, Dict, List
+import datetime
+import json
+from typing import Any, Dict, List, Type
 
 import dash_bootstrap_components as dbc
+import pandas as pd
 from llama_index.core.workflow import StopEvent, Workflow
+from pydantic import BaseModel
+from pydantic.networks import HttpUrl
 
 THEMES = {
     "bootstrap": dbc.themes.BOOTSTRAP,
@@ -63,3 +68,116 @@ def get_external_stylesheets(theme_name: str) -> List[str | Dict[str, Any]]:
     if stylesheet is None:
         raise ValueError(f"Unknown theme: {theme_name}")
     return [stylesheet]
+
+
+def parse_input_value(value: Any, type_hint: Type) -> Any:
+    """
+    Parse the input value based on the expected type.
+
+    Args:
+        value: The raw input value from the dash component
+        type_hint: The expected type
+
+    Returns:
+        The parsed value
+    """
+    if value is None or value == "":
+        if type_hint is bool:
+            return False
+        return None
+
+    if type_hint is str:
+        return str(value)
+    elif type_hint is int:
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return 0
+    elif type_hint is float:
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return 0.0
+    elif type_hint is bool:
+        return bool(value)
+    elif type_hint is datetime.date:
+        if isinstance(value, str):
+            try:
+                return datetime.datetime.strptime(value, "%Y-%m-%d").date()
+            except ValueError:
+                return datetime.date.today()
+        return value
+    elif (
+        type_hint is list
+        or type_hint is List
+        or hasattr(type_hint, "__origin__")
+        and type_hint.__origin__ is list
+    ):
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return []
+    elif (
+        type_hint is dict
+        or type_hint is Dict
+        or hasattr(type_hint, "__origin__")
+        and type_hint.__origin__ is dict
+    ):
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+    elif issubclass(type_hint, BaseModel):
+        try:
+            return type_hint.parse_raw(value)
+        except Exception:
+            return None
+    else:
+        # For unknown types, return as is
+        return value
+
+
+def format_output_value(value: Any, type_hint: Type) -> Any:
+    """
+    Format the output value based on the component type.
+
+    Args:
+        value: The raw output value from the workflow
+        type_hint: The expected type
+
+    Returns:
+        The formatted value appropriate for the dash component
+    """
+    if value is None:
+        return "" if type_hint is str else None
+
+    if type_hint is str or type_hint is int or type_hint is float or type_hint is bool:
+        return str(value)
+    elif type_hint is HttpUrl or type_hint.__name__ == "HttpUrl":
+        return str(value)
+    elif type_hint is pd.DataFrame:
+        if isinstance(value, pd.DataFrame):
+            return value.to_dict("records")
+        return []
+    elif (
+        type_hint.__name__ == "Figure"
+        or hasattr(type_hint, "__name__")
+        and "Figure" in type_hint.__name__
+    ):
+        return value
+    elif isinstance(value, (dict, list)) or type_hint is dict or type_hint is list:
+        try:
+            return json.dumps(value, indent=2, default=str)
+        except Exception:
+            return str(value)
+    else:
+        # For complex objects, try JSON serialization
+        try:
+            if hasattr(value, "json"):
+                return value.json(indent=2)
+            elif hasattr(value, "model_dump_json"):
+                return value.model_dump_json(indent=2)
+            else:
+                return json.dumps(value, indent=2, default=str)
+        except Exception:
+            return str(value)

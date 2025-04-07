@@ -4,7 +4,7 @@ from typing import Dict, List, Type
 import dash_bootstrap_components as dbc
 import plotly.graph_objs as go
 from dash import dash_table, dcc, html
-from dash.dependencies import Component
+from dash.development.base_component import Component
 from pydantic import BaseModel, HttpUrl
 
 from .utils import MissingType
