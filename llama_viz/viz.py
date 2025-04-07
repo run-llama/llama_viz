@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Type
 import dash_bootstrap_components as dbc
 import diskcache
 import pandas as pd
-from dash import Dash, DiskcacheManager, Input, Output, State, html
+from dash import Dash, DiskcacheManager, Input, Output, State, html, set_props
 from dash.dependencies import Component
 from dash.exceptions import PreventUpdate
 from llama_index.core import __version__ as llama_index_version
@@ -316,7 +316,7 @@ class Viz:
             background=True,
             manager=self._background_callback_manager,
             prevent_initial_call=True,
-            progress=[Output(component_id="events-stream", component_property="value")],
+            progress=[Output("busy-output", component_property="children")],
             running=[
                 (Output("button-run", "disabled"), True, False),
             ],
@@ -341,7 +341,7 @@ class Viz:
                         continue
 
                     events_log.append(json.dumps(event, default=str))
-                    set_progress("\n".join(events_log))
+                    set_props("events-stream", {"value": "\n".join(events_log)})
 
                 return await handler
 
