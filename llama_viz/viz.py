@@ -8,6 +8,7 @@ import pandas as pd
 from dash import Dash, Input, Output, State, html
 from dash.dependencies import Component
 from dash.exceptions import PreventUpdate
+from llama_index.core import __version__ as llama_index_version
 from llama_index.core.workflow import StopEvent, Workflow
 from pydantic import BaseModel, HttpUrl
 
@@ -76,12 +77,6 @@ class Viz:
 
     def _get_layout(self) -> Component:
         """Creates the default layout for the app"""
-        # Get LlamaIndex version
-        try:
-            from llama_index.core import __version__ as llama_index_version
-        except ImportError:
-            llama_index_version = "unknown"
-
         return dbc.Container(
             [
                 # Header with title and theme info
@@ -143,6 +138,29 @@ class Viz:
                 ),
                 # Loading spinner
                 dbc.Spinner(html.Div(id="loading-output"), color="primary"),
+                # Modal for human input
+                dbc.Modal(
+                    [
+                        dbc.ModalHeader("Input Required"),
+                        dbc.ModalBody(
+                            [
+                                html.P(
+                                    id="modal-prompt", children="Please provide input:"
+                                ),
+                                dbc.Textarea(
+                                    id="modal-input",
+                                    placeholder="Your response...",
+                                    style={"width": "100%", "minHeight": "100px"},
+                                ),
+                            ]
+                        ),
+                        dbc.ModalFooter(
+                            dbc.Button("Submit", id="modal-submit", color="primary")
+                        ),
+                    ],
+                    id="input-modal",
+                    is_open=False,
+                ),
                 # Footer
                 html.Hr(),
                 dbc.Row(
