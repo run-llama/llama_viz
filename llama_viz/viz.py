@@ -309,10 +309,6 @@ class Viz:
     def _create_callback(self):
         """Create the main callback for the workflow"""
 
-        # Add events-stream to output components
-        events_output = Output(component_id="events-stream", component_property="value")
-
-        # Main app callback
         @self._app.callback(
             output=self._output_components,
             inputs=self._input_components,
@@ -320,7 +316,7 @@ class Viz:
             background=True,
             manager=self._background_callback_manager,
             prevent_initial_call=True,
-            progress=[events_output],
+            progress=[Output(component_id="events-stream", component_property="value")],
         )
         def _run_workflow(set_progress, n_clicks, *args):
             if n_clicks is None:
