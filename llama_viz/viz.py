@@ -317,6 +317,9 @@ class Viz:
             manager=self._background_callback_manager,
             prevent_initial_call=True,
             progress=[Output(component_id="events-stream", component_property="value")],
+            running=[
+                (Output("button-run", "disabled"), True, False),
+            ],
         )
         def _run_workflow(set_progress, n_clicks, *args):
             if n_clicks is None:
