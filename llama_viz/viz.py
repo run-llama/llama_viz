@@ -136,8 +136,6 @@ class Viz:
                         ),
                     ]
                 ),
-                # Loading spinner
-                dbc.Spinner(html.Div(id="loading-output"), color="primary"),
                 # Modal for human input
                 dbc.Modal(
                     [
