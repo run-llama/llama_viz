@@ -331,21 +331,6 @@ class Viz:
             # Collect events
             events_log = []
 
-            # Create a context manager to collect events
-            class EventCollector:
-                def __init__(self, events_list):
-                    self.events = events_list
-
-                async def __aenter__(self):
-                    return self
-
-                async def __aexit__(self, exc_type, exc_val, exc_tb):
-                    pass
-
-                def append(self, event):
-                    event_str = json.dumps(event, default=str)
-                    self.events.append(event_str)
-
             # Run the workflow with event collection
             async def run_with_events():
                 handler = self._workflow.run(**run_params)
