@@ -170,7 +170,7 @@ def get_input_component(name: str, type_hint: Type) -> tuple[Component, str]:
         return (
             dcc.DatePickerSingle(
                 id=f"input-{name}",
-                date=datetime.date.today(),
+                date=datetime.datetime.today(),
                 display_format="YYYY-MM-DD",
                 className="mb-2",
             ),
