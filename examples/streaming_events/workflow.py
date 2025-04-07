@@ -1,3 +1,5 @@
+import asyncio
+
 from llama_index.core.workflow import (
     Context,
     Event,
@@ -29,6 +31,7 @@ class StreamingWorkflow(Workflow):
     async def stream(self, ctx: Context, ev: QueryEvent) -> StopEvent | None:
         for msg in ("Hello, world", "I am an info message"):
             ctx.write_event_to_stream(InfoMessage(msg=msg))
+            await asyncio.sleep(1)
 
         ctx.write_event_to_stream(ErrorMessage(msg="There was an error"))
         return StopEvent(result="Finish")

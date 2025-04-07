@@ -4,8 +4,9 @@ import json
 from typing import Any, Dict, List, Type
 
 import dash_bootstrap_components as dbc
+import diskcache
 import pandas as pd
-from dash import Dash, Input, Output, State, html
+from dash import Dash, DiskcacheManager, Input, Output, State, html
 from dash.dependencies import Component
 from dash.exceptions import PreventUpdate
 from llama_index.core import __version__ as llama_index_version
@@ -30,6 +31,8 @@ class Viz:
         """
         self._app = Dash(__name__, external_stylesheets=get_external_stylesheets(theme))
         self._theme = theme
+        self._cache = diskcache.Cache("./cache")
+        self._background_callback_manager = DiskcacheManager(self._cache)
         # Setup and introspect workflow
         self._workflow = workflow
         self._inputs: dict[str, type] = get_workflow_inputs(self._workflow)
@@ -308,14 +311,18 @@ class Viz:
 
         # Add events-stream to output components
         events_output = Output(component_id="events-stream", component_property="value")
-        all_outputs = self._output_components + [events_output]
 
+        # Main app callback
         @self._app.callback(
-            output=all_outputs,
+            output=self._output_components,
             inputs=self._input_components,
             state=self._state_components,
+            background=True,
+            manager=self._background_callback_manager,
+            prevent_initial_call=True,
+            progress=[events_output],
         )
-        def _run_workflow(n_clicks, *args):
+        def _run_workflow(set_progress, n_clicks, *args):
             if n_clicks is None:
                 raise PreventUpdate
 
@@ -326,19 +333,20 @@ class Viz:
                 if parsed_value is not None:  # Only add non-None values
                     run_params[input_name] = parsed_value
 
-            # Collect events
-            events_log = []
-
             # Run the workflow with event collection
-            async def run_with_events():
+            async def run_stream_events():
+                events_log = []
                 handler = self._workflow.run(**run_params)
                 async for event in handler.stream_events():
-                    if not isinstance(event, StopEvent):
-                        events_log.append(json.dumps(event, default=str))
-                result = await handler
-                return result
+                    if isinstance(event, StopEvent):
+                        continue
 
-            result = asyncio.run(run_with_events())
+                    events_log.append(json.dumps(event, default=str))
+                    set_progress("\n".join(events_log))
+
+                return await handler
+
+            result = asyncio.run(run_stream_events())
 
             # Format output values
             output_values = []
@@ -366,10 +374,6 @@ class Viz:
                     output_values.append(
                         self._format_output_value(output_value, output_type)
                     )
-
-            # Add events log to output values
-            events_text = "\n".join(events_log)
-            output_values.append(events_text)
 
             return output_values
 
