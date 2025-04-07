@@ -37,7 +37,7 @@ def get_output_component(name: str, type_hint: Type) -> tuple[Component, str]:
         )
     elif type_hint is int or type_hint is float:
         return (
-            dbc.Input(id=f"output-{name}", type="text", className="mb-2"),
+            dbc.Input(id=f"output-{name}", type="number", className="mb-2"),
             "value",
         )
     elif type_hint is bool:
