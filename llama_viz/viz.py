@@ -3,6 +3,7 @@ import datetime
 import json
 from typing import Any, Dict, List, Type
 
+import dash
 import dash_bootstrap_components as dbc
 import diskcache
 import pandas as pd
@@ -10,7 +11,8 @@ from dash import Dash, DiskcacheManager, Input, Output, State, html, set_props
 from dash.dependencies import Component
 from dash.exceptions import PreventUpdate
 from llama_index.core import __version__ as llama_index_version
-from llama_index.core.workflow import StopEvent, Workflow
+from llama_index.core.workflow import Context, StopEvent, Workflow
+from llama_index.core.workflow.events import HumanResponseEvent, InputRequiredEvent
 from pydantic import BaseModel, HttpUrl
 
 from .components import get_input_component, get_output_component
@@ -37,6 +39,7 @@ class Viz:
         self._workflow = workflow
         self._inputs: dict[str, type] = get_workflow_inputs(self._workflow)
         self._outputs: dict[str, type] = get_workflow_outputs(self._workflow)
+        self._ctx: Context | None = None
         # Dash data
         self._input_components = []
         self._output_components = []
@@ -310,9 +313,11 @@ class Viz:
         """Create the main callback for the workflow"""
 
         @self._app.callback(
-            output=self._output_components,
-            inputs=self._input_components,
-            state=self._state_components,
+            output=self._output_components
+            + [Output("input-modal", component_property="is_open")],
+            inputs=self._input_components
+            + [Input("modal-submit", component_property="n_clicks")],
+            state=self._state_components + [State("modal-input", "value")],
             background=True,
             manager=self._background_callback_manager,
             prevent_initial_call=True,
@@ -321,9 +326,20 @@ class Viz:
                 (Output("button-run", "disabled"), True, False),
             ],
         )
-        def _run_workflow(set_progress, n_clicks, *args):
-            if n_clicks is None:
+        def _run_workflow(set_progress, run_clicks, modal_clicks, *args):
+            ctx = dash.callback_context
+            triggered_id = (
+                ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else None
+            )
+
+            if not triggered_id:
                 raise PreventUpdate
+
+            modal_input_value = ""
+            if triggered_id == "button-run":
+                self._ctx = None
+            elif triggered_id == "modal-submit":
+                modal_input_value = args[-1]
 
             # Parse input values
             run_params = {}
@@ -335,10 +351,19 @@ class Viz:
             # Run the workflow with event collection
             async def run_stream_events():
                 events_log = []
+                if self._ctx:
+                    run_params["ctx"] = self._ctx
                 handler = self._workflow.run(**run_params)
+                if modal_input_value:
+                    handler._ctx.send_event(
+                        HumanResponseEvent(response=modal_input_value)
+                    )
+                self._ctx = handler.ctx
                 async for event in handler.stream_events():
                     if isinstance(event, StopEvent):
                         continue
+                    if isinstance(event, InputRequiredEvent):
+                        return None
 
                     events_log.append(json.dumps(event, default=str))
                     set_props("events-stream", {"value": "\n".join(events_log)})
@@ -347,9 +372,7 @@ class Viz:
 
             result = asyncio.run(run_stream_events())
 
-            # Format output values
             output_values = []
-
             # First, add empty values for input clearing
             for _ in range(len(self._inputs)):
                 output_values.append(None)
@@ -373,6 +396,12 @@ class Viz:
                     output_values.append(
                         self._format_output_value(output_value, output_type)
                     )
+
+            if result is None:
+                # Workflow didn't finish, show the modal
+                output_values.append(True)
+            else:
+                output_values.append(False)
 
             return output_values
 
