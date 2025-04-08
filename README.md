@@ -6,7 +6,13 @@ Turn your LlamaIndex Workflows into beautiful UIs!
 
 ## Installation
 
-Just `pip install llama-viz` and you are in business.
+Just do
+
+```sh
+pip install "git+https://github.com/run-llama/llama_viz.git"
+```
+
+and you are in business.
 
 ## Quick start
 
