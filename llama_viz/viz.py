@@ -1,10 +1,11 @@
 import asyncio
 import json
+import datetime
 
 import dash
 import dash_bootstrap_components as dbc
 import diskcache
-from dash import Dash, DiskcacheManager, Input, Output, State, html, set_props
+from dash import Dash, DiskcacheManager, Input, Output, State, html, set_props, dcc
 from dash.development.base_component import Component
 from dash.exceptions import PreventUpdate
 from llama_index.core import __version__ as llama_index_version
@@ -47,7 +48,7 @@ class Viz:
         self._output_components = []
         self._state_components = []
         self._get_components()
-        self._create_callback()
+        self._create_callbacks()
         # App layout
         self._app.layout = self._get_layout()
 
@@ -72,13 +73,42 @@ class Viz:
                 Output(component_id=f"input-{name}", component_property=property_name)
             )
 
-        # Create output components
+        # Create output components - separating text and non-text outputs
         self._output_widgets = []
+        self._text_output_ids = []  # Track text output IDs
+        self._artifact_components = []  # For artifact view
+        
+        # Initialize output components - will be populated below
+        self._output_components = []
+        
+        # First add input clearing outputs
+        for name, _type in self._inputs.items():
+            _, property_name = get_input_component(name, _type)
+            self._output_components.append(
+                Output(component_id=f"input-{name}", component_property=property_name)
+            )
+            
+        # Now add output components
         for name, _type in self._outputs.items():
             component, property_name = get_output_component(name, _type)
-            self._output_widgets.append(
-                dbc.CardGroup([dbc.Label(f"Output: {name.capitalize()}"), component])
+            is_text_output = _type is str
+            
+            if is_text_output:
+                # Track text output IDs for chat view
+                self._text_output_ids.append(name)
+            
+            # All outputs go to the artifacts view
+            self._artifact_components.append(
+                dbc.Card(
+                    dbc.CardBody([
+                        html.H5(name.capitalize(), className="card-title"),
+                        component
+                    ]),
+                    className="mb-3"
+                )
             )
+            
+            # Add to output components for callback
             self._output_components.append(
                 Output(component_id=f"output-{name}", component_property=property_name)
             )
@@ -108,10 +138,27 @@ class Viz:
                 # Main content
                 dbc.Row(
                     [
-                        # Input column
+                        # Left column: Chat view and Input
                         dbc.Col(
                             [
-                                html.H3("Inputs"),
+                                # Chat messages view
+                                html.H3("Chat"),
+                                dbc.Card(
+                                    dbc.CardBody(
+                                        id="chat-messages",
+                                        children=[],
+                                        style={
+                                            "minHeight": "400px", 
+                                            "maxHeight": "600px", 
+                                            "overflowY": "auto",
+                                            "padding": "15px"
+                                        }
+                                    ),
+                                    className="mb-3",
+                                ),
+                                
+                                # Input section
+                                html.H3("Input"),
                                 dbc.Form(self._input_widgets),
                                 dbc.Button(
                                     "Run Workflow",
@@ -120,27 +167,55 @@ class Viz:
                                     className="mt-3 mb-4",
                                 ),
                             ],
-                            md=5,
+                            md=6,
                         ),
-                        # Output column
-                        dbc.Col([html.H3("Outputs"), *self._output_widgets], md=7),
-                    ]
-                ),
-                # Events stream pane
-                dbc.Row(
-                    [
+                        
+                        # Right column: Artifacts view
                         dbc.Col(
                             [
-                                html.H3("Events"),
-                                dbc.Textarea(
-                                    id="events-stream",
-                                    placeholder="Events streamed will appear here...",
-                                    style={"width": "100%", "minHeight": "200px"},
+                                html.H3("Artifacts"),
+                                # Non-text outputs as cards
+                                *self._artifact_components,
+                                
+                                # Events stream
+                                html.H4("Events", className="mt-3"),
+                                dbc.Card([
+                                    # Events summary bar
+                                    dbc.CardHeader(
+                                        html.Div([
+                                            html.Span("Event Stream", className="h6"),
+                                            html.Div([
+                                                html.Span(
+                                                    id="events-counter", 
+                                                    children="0 events",
+                                                    className="badge bg-secondary me-2"
+                                                ),
+                                                dbc.Button(
+                                                    "Clear",
+                                                    id="clear-events",
+                                                    color="light",
+                                                    size="sm",
+                                                    className="py-0 px-2"
+                                                )
+                                            ], className="d-flex align-items-center")
+                                        ]),
+                                        className="d-flex justify-content-between align-items-center"
+                                    ),
+                                    dbc.CardBody(
+                                        html.Div(
+                                            id="events-stream-container",
+                                            children=[],
+                                            style={
+                                                "maxHeight": "400px",
+                                                "overflowY": "auto",
+                                                "padding": "5px"
+                                            }
+                                        )
+                                    )],
                                     className="mb-3",
-                                    readOnly=True,
                                 ),
                             ],
-                            md=12,
+                            md=6,
                         ),
                     ]
                 ),
@@ -167,6 +242,8 @@ class Viz:
                     id="input-modal",
                     is_open=False,
                 ),
+                # Storage for events data
+                dcc.Store(id='events-data', data={'events': [], 'count': 0}),
                 # Footer
                 html.Hr(),
                 dbc.Row(
@@ -190,20 +267,71 @@ class Viz:
                         )
                     ]
                 ),
+                # Hidden div for storing busy state
+                html.Div(id="busy-output", style={"display": "none"}),
             ],
             fluid=True,
             className="p-5",
         )
 
-    def _create_callback(self):
+    def _create_callbacks(self):
         """Create the main callback for the workflow"""
+
+        # Add callback for collapsible json sections
+        @self._app.callback(
+            Output({'type': 'collapse-content', 'index': dash.dependencies.MATCH}, 'style'),
+            [Input({'type': 'collapse-button', 'index': dash.dependencies.MATCH}, 'n_clicks')],
+            [State({'type': 'collapse-content', 'index': dash.dependencies.MATCH}, 'style')],
+        )
+        def toggle_collapse(n_clicks, current_style):
+            if n_clicks is None:
+                return current_style
+                
+            if n_clicks % 2 == 1:
+                # Hide content
+                return {'display': 'none'}
+            else:
+                # Show content
+                return {'display': 'block'}
+
+        # Callback to clear events
+        @self._app.callback(
+            [
+                Output("events-data", "data"),
+            ],
+            Input("clear-events", "n_clicks"),
+            prevent_initial_call=True
+        )
+        def clear_events(n_clicks):
+            if n_clicks:
+                return [{'events': [], 'count': 0}]
+            raise PreventUpdate
+            
+        # Callback to update UI from events-data store
+        @self._app.callback(
+            [
+                Output("events-stream-container", "children"),
+                Output("events-counter", "children")
+            ],
+            Input("events-data", "data"),
+            prevent_initial_call=True
+        )
+        def update_events_ui(data):
+            events = data.get('events', [])
+            count = data.get('count', 0)
+            return events, f"{count} event{'s' if count != 1 else ''}"
 
         @self._app.callback(
             output=self._output_components
-            + [Output("input-modal", component_property="is_open")],
+            + [Output("input-modal", component_property="is_open")]
+            + [Output("chat-messages", component_property="children", allow_duplicate=True)]
+            + [Output("events-data", "data", allow_duplicate=True)],
             inputs=self._input_components
             + [Input("modal-submit", component_property="n_clicks")],
-            state=self._state_components + [State("modal-input", "value")],
+            state=self._state_components 
+            + [State("modal-input", "value")]
+            + [State("chat-messages", "children")]
+            + [State("events-data", "data")],
             background=True,
             manager=self._background_callback_manager,
             prevent_initial_call=True,
@@ -221,22 +349,87 @@ class Viz:
             if not triggered_id:
                 raise PreventUpdate
 
-            modal_input_value = ""
+            # Split args into input values, modal input, chat messages, and events data
+            input_values = args[:len(self._inputs)]
+            modal_input_value = args[len(self._inputs)] if len(args) > len(self._inputs) else ""
+            chat_messages = args[-2] if len(args) > 1 and isinstance(args[-2], list) else []
+            events_data = args[-1] if len(args) > 0 else {'events': [], 'count': 0}
+                
             if triggered_id == "button-run":
                 self._ctx = None
+                
+                # Clear events data when starting a new run
+                events_data = {'events': [], 'count': 0}
+                
+                # Add user query to chat - use the input value based on the workflow
+                query_data = {}
+                for i, (input_name, input_type) in enumerate(self._inputs.items()):
+                    if i < len(input_values) and input_values[i]:
+                        parsed_value = parse_input_value(input_values[i], input_type)
+                        if parsed_value is not None:
+                            query_data[input_name] = parsed_value
+                
+                # Only add to chat if there's actual input data
+                if query_data:
+                    # Format user message based on number of inputs
+                    if len(query_data) == 1:
+                        # Single input - show simple message
+                        input_name = list(query_data.keys())[0]
+                        query_text = str(query_data[input_name])
+                        chat_content = query_text
+                    else:
+                        # Multiple inputs - show formatted JSON
+                        query_text = json.dumps(query_data, indent=2)
+                        chat_content = [
+                            html.Small("Input parameters:"),
+                            html.Pre(query_text, style={"marginBottom": 0})
+                        ]
+                        
+                    # Add user message to chat
+                    chat_messages.append(
+                        dbc.Card(
+                            dbc.CardBody(chat_content),
+                            className="mb-2 border-primary",
+                            style={
+                                "backgroundColor": "#f8f9fa", 
+                                "marginLeft": "auto", 
+                                "marginRight": "0", 
+                                "maxWidth": "80%",
+                                "borderRadius": "15px 15px 0 15px"
+                            }
+                        )
+                    )
+                    
             elif triggered_id == "modal-submit":
-                modal_input_value = args[-1]
+                # Add user response to chat
+                if modal_input_value:
+                    chat_messages.append(
+                        dbc.Card(
+                            dbc.CardBody(modal_input_value),
+                            className="mb-2 border-primary",
+                            style={
+                                "backgroundColor": "#f8f9fa", 
+                                "marginLeft": "auto", 
+                                "marginRight": "0", 
+                                "maxWidth": "80%",
+                                "borderRadius": "15px 15px 0 15px"
+                            }
+                        )
+                    )
 
-            # Parse input values
+            # Parse input values for running the workflow
             run_params = {}
             for i, (input_name, input_type) in enumerate(self._inputs.items()):
-                parsed_value = parse_input_value(args[i], input_type)
-                if parsed_value is not None:  # Only add non-None values
-                    run_params[input_name] = parsed_value
+                if i < len(input_values):
+                    parsed_value = parse_input_value(input_values[i], input_type)
+                    if parsed_value is not None:  # Only add non-None values
+                        run_params[input_name] = parsed_value
 
             # Run the workflow with event collection
             async def run_stream_events():
-                events_log = []
+                events_list = events_data.get('events', [])
+                event_count = events_data.get('count', 0)
+                
                 if self._ctx:
                     run_params["ctx"] = self._ctx
                 handler = self._workflow.run(**run_params)
@@ -246,14 +439,70 @@ class Viz:
                         HumanResponseEvent(response=modal_input_value)
                     )
                 self._ctx = handler.ctx
+                
+                # Create a simple event card for each event
                 async for event in handler.stream_events():
                     if isinstance(event, StopEvent):
                         continue
                     if isinstance(event, InputRequiredEvent):
                         return None
 
-                    events_log.append(json.dumps(event, default=str))
-                    set_props("events-stream", {"value": "\n".join(events_log)})
+                    # Create a simple text description of the event
+                    event_count += 1
+                    event_type = event.__class__.__name__
+                    timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                    
+                    # TODO: Choose background color based on event type?
+                    bg_color, icon = "#f5f5f5", "🔄"  # Light gray for other events
+                    
+                    # Get event data as a JSON string
+                    try:
+                        # Extract event data using appropriate method
+                        event_data = event.model_dump()
+                            
+                        # Convert to a pretty JSON string
+                        try:
+                            event_json = json.dumps(event_data, indent=2, default=str)
+                        except:
+                            event_json = str(event_data)
+                    except Exception as e:
+                        # Fallback to simple string representation
+                        event_json = f"Error serializing event: {str(e)}\nEvent: {str(event)}"
+                    
+                    # Create a simple card to display the event
+                    card = html.Div([
+                        dbc.Card(
+                            dbc.CardBody([
+                                html.Div([
+                                    html.Span(f"{icon} {event_type}", style={"fontWeight": "bold"}),
+                                    html.Small(f"  {timestamp}", className="text-muted")
+                                ]),
+                                html.Pre(
+                                    event_json,
+                                    style={
+                                        "marginTop": "10px",
+                                        "padding": "10px",
+                                        "backgroundColor": "rgba(0,0,0,0.04)",
+                                        "borderRadius": "4px", 
+                                        "fontSize": "0.85rem",
+                                        "whiteSpace": "pre-wrap",
+                                        "overflow": "auto"
+                                    }
+                                )
+                            ]),
+                            className="mb-2",
+                            style={"backgroundColor": bg_color}
+                        )
+                    ])
+                    
+                    # Add card to events list (must be serializable HTML components)
+                    events_list.append(card)
+                    
+                    # Create updated events data
+                    updated_events_data = {'events': events_list, 'count': event_count}
+                    
+                    # Update the events data store
+                    set_props("events-data", {"data": updated_events_data})
 
                 return await handler
 
@@ -264,29 +513,100 @@ class Viz:
             for _ in range(len(self._inputs)):
                 output_values.append(None)
 
-            # Then add the formatted output values
-            if len(self._outputs) == 1 and "result" in self._outputs:
-                # Special case for simple workflows with just a "result" output
-                output_values.append(
-                    format_output_value(result, self._outputs["result"])
+            # Create workflow response card for chat (if there is result data)
+            workflow_responses = []
+            has_response = False
+            
+            # Then handle the formatted output values
+            if result is not None:
+                # Handle various result types based on workflow structure
+                if len(self._outputs) == 1 and "result" in self._outputs:
+                    # Simple workflow with just a "result" output
+                    output_val = format_output_value(result, self._outputs["result"])
+                    output_values.append(output_val)
+                    
+                    # Add to workflow responses for chat
+                    if result:
+                        has_response = True
+                        if self._outputs["result"] is str:
+                            workflow_responses.append(output_val)
+                        elif isinstance(result, (dict, list)):
+                            workflow_responses.append(html.Pre(json.dumps(result, indent=2, default=str)))
+                        else:
+                            workflow_responses.append(str(result))
+                else:
+                    # Complex workflow with multiple outputs
+                    for output_name, output_type in self._outputs.items():
+                        # Extract output value
+                        if hasattr(result, output_name):
+                            output_value = getattr(result, output_name)
+                        elif isinstance(result, dict) and output_name in result:
+                            output_value = result[output_name]
+                        else:
+                            output_value = None
+                            
+                        # Format and add to output components
+                        formatted_output = format_output_value(output_value, output_type)
+                        output_values.append(formatted_output)
+                        
+                        # Add to workflow responses if there's content
+                        if output_value is not None:
+                            has_response = True
+                            
+                            # Format display based on output type
+                            if output_name in self._text_output_ids and output_type is str:
+                                # Text output goes directly to chat with label
+                                workflow_responses.append(
+                                    html.Div([
+                                        html.Strong(f"{output_name.capitalize()}: ") if len(self._outputs) > 1 else "",
+                                        formatted_output
+                                    ])
+                                )
+                            elif isinstance(output_value, (dict, list)):
+                                # Format complex data as JSON
+                                workflow_responses.append(
+                                    html.Div([
+                                        html.Strong(f"{output_name.capitalize()}: "),
+                                        html.Pre(formatted_output if isinstance(formatted_output, str) else json.dumps(output_value, indent=2, default=str))
+                                    ])
+                                )
+                            else:
+                                # Other outputs with simple formatting
+                                workflow_responses.append(
+                                    html.Div([
+                                        html.Strong(f"{output_name.capitalize()}: "),
+                                        str(output_value)
+                                    ])
+                                )
+            
+            # Add the workflow response to chat if there's content
+            if has_response:
+                chat_messages.append(
+                    dbc.Card(
+                        dbc.CardBody(workflow_responses),
+                        className="mb-2 text-white",
+                        style={
+                            "backgroundColor": "#007bff", 
+                            "marginRight": "auto", 
+                            "marginLeft": "0", 
+                            "maxWidth": "80%",
+                            "borderRadius": "15px 15px 15px 0"
+                        }
+                    )
                 )
-            else:
-                # For more complex workflows with multiple outputs
-                for output_name, output_type in self._outputs.items():
-                    if hasattr(result, output_name):
-                        output_value = getattr(result, output_name)
-                    elif isinstance(result, dict) and output_name in result:
-                        output_value = result[output_name]
-                    else:
-                        output_value = result  # Use the whole result if we can't find a specific attribute
 
-                    output_values.append(format_output_value(output_value, output_type))
-
+            # Add modal state to outputs
             if result is None:
                 # Workflow didn't finish, show the modal
                 output_values.append(True)
             else:
                 output_values.append(False)
+            
+            # Add updated chat messages to output
+            output_values.append(chat_messages)
+            
+            # Add events data to output
+            output_values.append(events_data)
 
             return output_values
 
