@@ -11,7 +11,8 @@ dependencies = [
     "llama-index-core (>=0.11.0,<1)",
     "dash[diskcache] (>=3.0.2,<4.0.0)",
     "dash-bootstrap-components<3",
-    "plotly (>=6.0.0,<7.0.0)"
+    "plotly (>=6.0.0,<7.0.0)",
+    "pandas (>=2.2.3,<3.0.0)"
 ]
 
 
