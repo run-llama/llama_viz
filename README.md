@@ -62,16 +62,14 @@ class ImageDrawWorkflow(Workflow):
 
         # Get the URL of the generated image
         image_url = response.data[0].url or ""
-
-        # return StopEvent(result=llm_response.text)
         return ImageDrawn(image=HttpUrl(image_url))
 
 
 if __name__ == "__main__":
-    # Wrap the workflow in a Viz object.
-    be = Viz(ImageDrawWorkflow())
+    # Just wrap the workflow in a Viz object, no additional code needed.
+    ui = Viz(ImageDrawWorkflow())
     # Run the UI, the workflow will run in the background.
-    be.run(debug=True)
+    ui.run(debug=True)
 ```
 
 To build and run the UI, from a terminal:
