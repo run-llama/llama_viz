@@ -51,8 +51,12 @@ def get_output_component(name: str, type_hint: Type) -> tuple[Component, str]:
                 id=f"output-{name}",
                 style={
                     "maxWidth": "100%",
-                    "maxHeight": "500px",
+                    "maxHeight": "300px",
                     "marginTop": "10px",
+                    "objectFit": "contain",
+                    "display": "block",
+                    "marginLeft": "auto",
+                    "marginRight": "auto",
                 },
                 className="mb-2",
             ),
@@ -96,6 +100,15 @@ def get_output_component(name: str, type_hint: Type) -> tuple[Component, str]:
                 id=f"output-{name}",
                 page_size=10,
                 style_table={"overflowX": "auto"},
+                style_cell={
+                    'overflow': 'hidden',
+                    'textOverflow': 'ellipsis',
+                    'maxWidth': 0,
+                },
+                style_header={
+                    'backgroundColor': 'rgb(230, 230, 230)',
+                    'fontWeight': 'bold'
+                },
             ),
             "data",
         )
@@ -105,7 +118,12 @@ def get_output_component(name: str, type_hint: Type) -> tuple[Component, str]:
         and "Figure" in type_hint.__name__
     ):
         return (
-            dcc.Graph(id=f"output-{name}", figure=go.Figure(), className="mb-2"),
+            dcc.Graph(
+                id=f"output-{name}", 
+                figure=go.Figure(), 
+                className="mb-2",
+                style={"height": "400px"},
+            ),
             "figure",
         )
     else:
