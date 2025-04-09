@@ -427,6 +427,7 @@ class Viz:
 
             # Run the workflow with event collection
             async def run_stream_events():
+                # Get existing events and count from the store
                 events_list = events_data.get('events', [])
                 event_count = events_data.get('count', 0)
                 
@@ -447,12 +448,11 @@ class Viz:
                     if isinstance(event, InputRequiredEvent):
                         return None
 
-                    # Create a simple text description of the event
+                    # Increment event count
                     event_count += 1
                     event_type = event.__class__.__name__
                     timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
                     
-                    # TODO: Choose background color based on event type?
                     bg_color, icon = "#f5f5f5", "🔄"  # Light gray for other events
                     
                     # Get event data as a JSON string
@@ -495,13 +495,11 @@ class Viz:
                         )
                     ])
                     
-                    # Add card to events list (must be serializable HTML components)
+                    # Add card to events list
                     events_list.append(card)
                     
-                    # Create updated events data
+                    # Update the events data store with current count
                     updated_events_data = {'events': events_list, 'count': event_count}
-                    
-                    # Update the events data store
                     set_props("events-data", {"data": updated_events_data})
 
                 return await handler
@@ -513,13 +511,19 @@ class Viz:
             for _ in range(len(self._inputs)):
                 output_values.append(None)
 
-            # Create workflow response card for chat (if there is result data)
-            workflow_responses = []
-            has_response = False
-            
-            # Then handle the formatted output values
-            if result is not None:
-                # Handle various result types based on workflow structure
+            # Then add output values
+            if result is None:
+                # Input required case - add empty values for all outputs
+                for _ in self._outputs.items():
+                    output_values.append(None)
+                # Show the modal
+                output_values.append(True)
+            else:
+                # Create workflow response card for chat (if there is result data)
+                workflow_responses = []
+                has_response = False
+                
+                # Handle the formatted output values
                 if len(self._outputs) == 1 and "result" in self._outputs:
                     # Simple workflow with just a "result" output
                     output_val = format_output_value(result, self._outputs["result"])
@@ -578,29 +582,25 @@ class Viz:
                                         str(output_value)
                                     ])
                                 )
-            
-            # Add the workflow response to chat if there's content
-            if has_response:
-                chat_messages.append(
-                    dbc.Card(
-                        dbc.CardBody(workflow_responses),
-                        className="mb-2 text-white",
-                        style={
-                            "backgroundColor": "#007bff", 
-                            "marginRight": "auto", 
-                            "marginLeft": "0", 
-                            "maxWidth": "80%",
-                            "borderRadius": "15px 15px 15px 0"
-                        }
-                    )
-                )
-
-            # Add modal state to outputs
-            if result is None:
-                # Workflow didn't finish, show the modal
-                output_values.append(True)
-            else:
+                
+                # Add modal state (closed)
                 output_values.append(False)
+                
+                # Add the workflow response to chat if there's content
+                if has_response:
+                    chat_messages.append(
+                        dbc.Card(
+                            dbc.CardBody(workflow_responses),
+                            className="mb-2 text-white",
+                            style={
+                                "backgroundColor": "#007bff", 
+                                "marginRight": "auto", 
+                                "marginLeft": "0", 
+                                "maxWidth": "80%",
+                                "borderRadius": "15px 15px 15px 0"
+                            }
+                        )
+                    )
             
             # Add updated chat messages to output
             output_values.append(chat_messages)
